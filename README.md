@@ -22,6 +22,8 @@ Start the API:
 python app.py
 ```
 
+The local server runs on `http://127.0.0.1:5001`.
+
 Main endpoints:
 
 ```text

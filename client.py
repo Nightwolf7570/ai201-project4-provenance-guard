@@ -6,7 +6,7 @@ import urllib.error
 import urllib.request
 
 
-DEFAULT_BASE_URL = "http://127.0.0.1:5000"
+DEFAULT_BASE_URL = "http://127.0.0.1:5001"
 
 
 def print_json(data):
@@ -36,7 +36,10 @@ def request_json(base_url, path, method="GET", payload=None):
         try:
             return json.loads(body), error.code
         except json.JSONDecodeError:
-            return {"error": body}, error.code
+            return {
+                "error": body or f"HTTP {error.code} {error.reason}",
+                "status": error.code,
+            }, error.code
     except urllib.error.URLError as error:
         return {
             "error": "Could not connect to the API.",
