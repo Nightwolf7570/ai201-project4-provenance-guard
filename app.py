@@ -8,14 +8,23 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from groq import Groq
 
 
 load_dotenv()
 
 app = Flask(__name__)
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=[],
+    storage_uri="memory://",
+)
 
 AUDIT_LOG_PATH = Path("audit_log.jsonl")
+CONTENT_RECORDS_PATH = Path("content_records.json")
 GROQ_MODEL = "llama-3.3-70b-versatile"
 AI_STYLE_PHRASES = [
     "certainly",
@@ -26,6 +35,11 @@ AI_STYLE_PHRASES = [
     "delve",
     "transformative",
 ]
+LABEL_TEXT = {
+    "likely_ai": "Provenance Guard found strong signals that this text may have been AI-generated. This label is based on automated analysis and may be appealed by the creator.",
+    "likely_human": "Provenance Guard found strong signals that this text is likely human-written. This label reflects automated analysis and is not a guarantee of authorship.",
+    "uncertain": "Provenance Guard could not confidently determine whether this text was human-written or AI-generated. Readers should treat the attribution as uncertain.",
+}
 
 
 def utc_timestamp():
@@ -42,6 +56,10 @@ def map_score_to_attribution(score):
     if score < 0.40:
         return "likely_human"
     return "uncertain"
+
+
+def generate_label(attribution):
+    return LABEL_TEXT[attribution]
 
 
 def combine_signal_scores(llm_score, heuristic_score):
@@ -188,7 +206,40 @@ def read_audit_entries(limit=25):
     return entries
 
 
+def read_content_records():
+    if not CONTENT_RECORDS_PATH.exists():
+        return {}
+
+    with CONTENT_RECORDS_PATH.open("r", encoding="utf-8") as records_file:
+        return json.load(records_file)
+
+
+def write_content_records(records):
+    with CONTENT_RECORDS_PATH.open("w", encoding="utf-8") as records_file:
+        json.dump(records, records_file, indent=2)
+
+
+def save_content_record(content_id, record):
+    records = read_content_records()
+    records[content_id] = record
+    write_content_records(records)
+
+
+@app.errorhandler(429)
+def rate_limit_error(error):
+    return (
+        jsonify(
+            {
+                "error": "Rate limit exceeded.",
+                "message": str(error.description),
+            }
+        ),
+        429,
+    )
+
+
 @app.route("/submit", methods=["POST"])
+@limiter.limit("10 per minute;100 per day")
 def submit():
     data = request.get_json(silent=True) or {}
     creator_id = data.get("creator_id")
@@ -212,13 +263,14 @@ def submit():
     heuristic_score = heuristic_result["score"]
     combined_score = round(combine_signal_scores(llm_score, heuristic_score), 3)
     attribution = map_score_to_attribution(combined_score)
+    label = generate_label(attribution)
 
     response_body = {
         "content_id": content_id,
         "creator_id": creator_id,
         "attribution": attribution,
         "confidence": combined_score,
-        "label": "Placeholder label: final transparency labels will be added in Milestone 5.",
+        "label": label,
         "signals": {
             "llm_score": llm_score,
             "llm_reasoning": llm_result["reasoning"],
@@ -227,6 +279,8 @@ def submit():
         },
         "status": "classified",
     }
+
+    save_content_record(content_id, response_body)
 
     audit_entry = {
         "event_type": "classification",
@@ -238,11 +292,62 @@ def submit():
         "llm_score": llm_score,
         "heuristic_score": heuristic_score,
         "heuristic_metrics": heuristic_result["metrics"],
+        "label": label,
         "status": "classified",
     }
     write_audit_entry(audit_entry)
 
     return jsonify(response_body)
+
+
+@app.route("/appeal", methods=["POST"])
+def appeal():
+    data = request.get_json(silent=True) or {}
+    content_id = data.get("content_id")
+    creator_reasoning = data.get("creator_reasoning")
+
+    if not content_id or not creator_reasoning:
+        return (
+            jsonify(
+                {
+                    "error": "Missing required fields.",
+                    "required_fields": ["content_id", "creator_reasoning"],
+                }
+            ),
+            400,
+        )
+
+    records = read_content_records()
+    original_record = records.get(content_id)
+    if not original_record:
+        return jsonify({"error": "Content ID not found."}), 404
+
+    original_record["status"] = "under_review"
+    original_record["appeal_reasoning"] = creator_reasoning
+    records[content_id] = original_record
+    write_content_records(records)
+
+    appeal_entry = {
+        "event_type": "appeal",
+        "timestamp": utc_timestamp(),
+        "content_id": content_id,
+        "creator_id": original_record["creator_id"],
+        "original_attribution": original_record["attribution"],
+        "original_confidence": original_record["confidence"],
+        "llm_score": original_record["signals"]["llm_score"],
+        "heuristic_score": original_record["signals"]["heuristic_score"],
+        "creator_reasoning": creator_reasoning,
+        "status": "under_review",
+    }
+    write_audit_entry(appeal_entry)
+
+    return jsonify(
+        {
+            "content_id": content_id,
+            "status": "under_review",
+            "message": "Appeal received. The content is now under review.",
+        }
+    )
 
 
 @app.route("/log", methods=["GET"])

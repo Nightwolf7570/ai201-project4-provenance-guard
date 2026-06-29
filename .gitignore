@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 instance/
 audit_log.jsonl
+content_records.json
