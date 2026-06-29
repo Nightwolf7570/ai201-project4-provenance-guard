@@ -30,6 +30,14 @@ POST /appeal
 GET /log
 ```
 
+You can test the app with the included CLI helper instead of writing raw `curl`:
+
+```bash
+python client.py submit --creator-id test-user-1 --text "Certainly, it is important to note that AI has transformative effects."
+python client.py log --limit 3
+python client.py appeal --content-id PASTE_CONTENT_ID_HERE --reason "I wrote this myself and want a review."
+```
+
 ## Architecture Overview
 
 A submission enters `POST /submit` with `creator_id` and `text`. Flask validates the request, creates a `content_id`, sends the text to the Groq signal, runs local stylometric heuristics, combines both scores, maps the combined score to an attribution result, generates a transparency label, stores the current content record, writes an audit log entry, and returns JSON.
