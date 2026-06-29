@@ -49,6 +49,8 @@ def read_text(args):
     if args.file:
         with open(args.file, "r", encoding="utf-8") as text_file:
             return text_file.read()
+    if args.text_option:
+        return args.text_option
     return args.text
 
 
@@ -104,9 +106,10 @@ def build_parser():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     submit_parser = subparsers.add_parser("submit", help="Submit text for analysis.")
-    submit_parser.add_argument("--creator-id", required=True)
-    text_source = submit_parser.add_mutually_exclusive_group(required=True)
-    text_source.add_argument("--text")
+    submit_parser.add_argument("text", nargs="?")
+    submit_parser.add_argument("--creator-id", default="cli-user")
+    text_source = submit_parser.add_mutually_exclusive_group()
+    text_source.add_argument("--text", dest="text_option")
     text_source.add_argument("--file")
     submit_parser.set_defaults(func=submit)
 

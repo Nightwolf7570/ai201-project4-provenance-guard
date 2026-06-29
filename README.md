@@ -33,7 +33,7 @@ GET /log
 You can test the app with the included CLI helper instead of writing raw `curl`:
 
 ```bash
-python client.py submit --creator-id test-user-1 --text "Certainly, it is important to note that AI has transformative effects."
+python client.py submit "Certainly, it is important to note that AI has transformative effects."
 python client.py log --limit 3
 python client.py appeal --content-id PASTE_CONTENT_ID_HERE --reason "I wrote this myself and want a review."
 ```
